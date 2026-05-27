@@ -11,10 +11,11 @@
 import json
 import logging
 import base64
+import asyncio
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
-import httpx
+import aiohttp
 from cryptography.fernet import Fernet
 
 import config
@@ -74,16 +75,16 @@ class ServerService:
         :return: {"success": bool, "message": str, "inbounds_count": int}
         """
         url = url.rstrip("/")
-        timeout = httpx.Timeout(15.0, connect=10.0)
+        timeout = aiohttp.ClientTimeout(total=15, connect=10)
 
         try:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async with aiohttp.ClientSession(timeout=timeout) as client:
                 # 1. Пробуем авторизоваться
                 login_resp = await client.post(
                     f"{url}/panel",
                     data={"username": username, "password": password},
                 )
-                login_data = login_resp.json() if login_resp.status_code == 200 else {}
+                login_data = await login_resp.json() if login_resp.status == 200 else {}
 
                 if not login_data.get("success"):
                     return {
@@ -94,7 +95,7 @@ class ServerService:
 
                 # 2. Пробуем получить inbounds
                 inb_resp = await client.get(f"{url}/panel/api/inbounds")
-                inb_data = inb_resp.json() if inb_resp.status_code == 200 else {}
+                inb_data = await inb_resp.json() if inb_resp.status == 200 else {}
                 inbounds = inb_data.get("obj", []) if inb_data.get("success") else []
 
                 return {
@@ -103,13 +104,13 @@ class ServerService:
                     "inbounds_count": len(inbounds),
                 }
 
-        except httpx.TimeoutException:
+        except asyncio.TimeoutError:
             return {
                 "success": False,
                 "message": "Превышено время ожидания. Сервер недоступен.",
                 "inbounds_count": 0,
             }
-        except httpx.ConnectError:
+        except aiohttp.ClientConnectorError:
             return {
                 "success": False,
                 "message": "Не удалось подключиться к серверу. Проверьте URL.",
